@@ -440,7 +440,7 @@ func handleVisualInput(msg tea.KeyPressMsg, cm *terminal.CopyMode, window *termi
 		cm.State = terminal.CopyModeNormal
 		o.ShowNotification(fmt.Sprintf("Yanked %d chars", len(text)), "success", config.NotificationDuration)
 		window.InvalidateCache()
-		return o, tea.SetClipboard(text)
+		return o, copyToSystemClipboard(text)
 
 	// Movement in visual mode extends selection - basic
 	case "h", "left":

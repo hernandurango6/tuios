@@ -81,13 +81,18 @@ type KeybindingsConfig struct {
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *UserConfig {
+	preferredShell := ""
+	if runtime.GOOS == "windows" {
+		preferredShell = "pwsh"
+	}
+
 	cfg := &UserConfig{
 		Appearance: AppearanceConfig{
 			BorderStyle:       "rounded",
 			HideWindowButtons: false,
 			ScrollbackLines:   10000,
 			DockbarPosition:   "bottom",
-			PreferredShell:    "",
+			PreferredShell:    preferredShell,
 		},
 		Daemon: DaemonConfig{
 			LogLevel:     "off",

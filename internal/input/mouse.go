@@ -19,6 +19,63 @@ func isInTerminalContent(x, y int, win *terminal.Window) bool {
 	return x >= 0 && y >= 0 && x < win.ContentWidth() && y < win.ContentHeight()
 }
 
+// focusedCopyModeActive reports whether the focused window is in vim copy mode.
+func focusedCopyModeActive(o *app.OS) bool {
+	fw := o.GetFocusedWindow()
+	return fw != nil && fw.CopyMode != nil && fw.CopyMode.Active
+}
+
+// isCopyModeMouseDrag reports whether a copy-mode selection drag is in progress.
+func isCopyModeMouseDrag(o *app.OS) bool {
+	if !o.Dragging || o.DraggedWindowIndex < 0 || o.DraggedWindowIndex >= len(o.Windows) {
+		return false
+	}
+	w := o.Windows[o.DraggedWindowIndex]
+	return w.CopyMode != nil && w.CopyMode.Active
+}
+
+// beginWindowResize starts a corner resize interaction for the clicked window.
+func beginWindowResize(o *app.OS, clickedWindowIndex int, mouseX, mouseY int, clickedWindow *terminal.Window) {
+	o.Resizing = true
+	o.DraggedWindowIndex = clickedWindowIndex
+	clickedWindow.IsBeingManipulated = true
+	o.ResizeStartX = mouseX
+	o.ResizeStartY = mouseY
+	o.PreResizeState = terminal.Window{
+		Title:  clickedWindow.Title,
+		Width:  clickedWindow.Width,
+		Height: clickedWindow.Height,
+		X:      clickedWindow.X,
+		Y:      clickedWindow.Y,
+		Z:      clickedWindow.Z,
+		ID:     clickedWindow.ID,
+	}
+
+	minX := clickedWindow.X
+	midX := clickedWindow.X + (clickedWindow.Width / 2)
+	minY := clickedWindow.Y
+	midY := clickedWindow.Y + (clickedWindow.Height / 2)
+
+	if mouseX < midX && mouseX >= minX {
+		o.ResizeCorner = app.BottomLeft
+		if mouseY < midY && mouseY >= minY {
+			o.ResizeCorner = app.TopLeft
+		}
+	} else {
+		o.ResizeCorner = app.BottomRight
+		if mouseY < midY && mouseY >= minY {
+			o.ResizeCorner = app.TopRight
+		}
+	}
+
+	switch o.ResizeCorner {
+	case app.TopLeft, app.BottomRight:
+		app.SetPointerShape(app.PointerNWSEResize)
+	case app.TopRight, app.BottomLeft:
+		app.SetPointerShape(app.PointerNESWResize)
+	}
+}
+
 // sendMouseToWindow forwards a mouse event to a window's terminal.
 // In daemon mode, the event is encoded as an escape sequence and written via PTY.
 // In local mode, the event is sent directly to the emulator.
@@ -116,8 +173,34 @@ func handleMouseClick(msg tea.MouseClickMsg, o *app.OS) (*app.OS, tea.Cmd) {
 		}
 	}
 
-	// Forward mouse events to terminal if in terminal mode and window has mouse tracking
-	if clickedWindowIndex != -1 && o.Mode == app.TerminalMode {
+	// Right-click paste in terminal mode (content area only).
+	if clickedWindowIndex != -1 && o.Mode == app.TerminalMode && msg.Button == tea.MouseRight {
+		clickedWindow := o.Windows[clickedWindowIndex]
+		_, _, inContent := clickedWindow.ScreenToTerminal(X, Y)
+		if inContent {
+			o.FocusWindow(clickedWindowIndex)
+			return o, pasteFromSystemClipboard(o)
+		}
+	}
+
+	// Copy mode mouse selection takes priority over terminal mouse forwarding.
+	if clickedWindowIndex != -1 && msg.Button == tea.MouseLeft {
+		clickedWindow := o.Windows[clickedWindowIndex]
+		if clickedWindow.CopyMode != nil && clickedWindow.CopyMode.Active {
+			_, _, inContent := clickedWindow.ScreenToTerminal(X, Y)
+			if inContent {
+				HandleCopyModeMouseDrag(clickedWindow.CopyMode, clickedWindow, X, Y)
+				o.Dragging = true
+				o.DraggedWindowIndex = clickedWindowIndex
+				o.InteractionMode = true
+				return o, nil
+			}
+		}
+	}
+
+	// Forward mouse events to terminal if in terminal mode and window has mouse tracking.
+	// Skip while copy mode owns the mouse on the focused window.
+	if clickedWindowIndex != -1 && o.Mode == app.TerminalMode && !focusedCopyModeActive(o) {
 		clickedWindow := o.Windows[clickedWindowIndex]
 		// Forward mouse only when app explicitly requested mouse tracking (DECSET 1000-1003)
 		if clickedWindow.Terminal != nil && clickedWindow.Terminal.HasMouseMode() {
@@ -199,24 +282,6 @@ func handleMouseClick(msg tea.MouseClickMsg, o *app.OS) (*app.OS, tea.Cmd) {
 		}
 	}
 
-	// Handle copy mode mouse clicks AFTER button checks
-	if clickedWindow.CopyMode != nil && clickedWindow.CopyMode.Active {
-		// In copy mode, handle mouse clicks for cursor movement and selection
-		if mouse.Button == tea.MouseLeft {
-			// Check if clicking in terminal content area (not on title bar or buttons)
-			_, _, inContent := clickedWindow.ScreenToTerminal(X, Y)
-			if inContent {
-				// Start drag for visual selection
-				HandleCopyModeMouseDrag(clickedWindow.CopyMode, clickedWindow, X, Y)
-				o.Dragging = true
-				o.DraggedWindowIndex = clickedWindowIndex
-				o.InteractionMode = true
-				return o, nil
-			}
-		}
-		// If click is outside content area, fall through to normal window interaction
-	}
-
 	// Focus the clicked window and bring to front Z-index
 	// This happens AFTER button and copy mode checks
 	o.FocusWindow(clickedWindowIndex)
@@ -238,49 +303,13 @@ func handleMouseClick(msg tea.MouseClickMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	o.DragOffsetY = Y - clickedWindow.Y
 
 	switch mouse.Button {
+	case tea.MouseMiddle:
+		beginWindowResize(o, clickedWindowIndex, mouse.X, mouse.Y, clickedWindow)
 	case tea.MouseRight:
-		// Already in interaction mode, now set resize-specific flags
-		o.Resizing = true
-		o.DraggedWindowIndex = clickedWindowIndex
-		o.Windows[clickedWindowIndex].IsBeingManipulated = true
-		o.ResizeStartX = mouse.X
-		o.ResizeStartY = mouse.Y
-		// Save state for resize calculations (avoid mutex copying)
-		o.PreResizeState = terminal.Window{
-			Title:  clickedWindow.Title,
-			Width:  clickedWindow.Width,
-			Height: clickedWindow.Height,
-			X:      clickedWindow.X,
-			Y:      clickedWindow.Y,
-			Z:      clickedWindow.Z,
-			ID:     clickedWindow.ID,
+		// WM mode: right-click resizes. Terminal mode: right-click pastes (handled above).
+		if o.Mode != app.TerminalMode {
+			beginWindowResize(o, clickedWindowIndex, mouse.X, mouse.Y, clickedWindow)
 		}
-		minX := clickedWindow.X
-		midX := clickedWindow.X + (clickedWindow.Width / 2)
-
-		minY := clickedWindow.Y
-		midY := clickedWindow.Y + (clickedWindow.Height / 2)
-
-		if mouse.X < midX && mouse.X >= minX {
-			o.ResizeCorner = app.BottomLeft
-			if mouse.Y < midY && mouse.Y >= minY {
-				o.ResizeCorner = app.TopLeft
-			}
-		} else {
-			o.ResizeCorner = app.BottomRight
-			if mouse.Y < midY && mouse.Y >= minY {
-				o.ResizeCorner = app.TopRight
-			}
-		}
-
-		// Set precise resize cursor based on corner
-		switch o.ResizeCorner {
-		case app.TopLeft, app.BottomRight:
-			app.SetPointerShape(app.PointerNWSEResize)
-		case app.TopRight, app.BottomLeft:
-			app.SetPointerShape(app.PointerNESWResize)
-		}
-
 	case tea.MouseLeft:
 		// Check if we're in selection mode
 		if o.SelectionMode {
@@ -373,11 +402,35 @@ func handleMouseMotion(msg tea.MouseMotionMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	// Update pointer shape based on what we're hovering over (OSC 22)
 	o.UpdatePointerForPosition(mouse.X, mouse.Y)
 
+	// Handle scrollbar drag
+	if o.ScrollbarDragging && o.ScrollbarDragWindowIndex >= 0 && o.ScrollbarDragWindowIndex < len(o.Windows) {
+		win := o.Windows[o.ScrollbarDragWindowIndex]
+		scrollToPosition(win, mouse.Y)
+		return o, nil
+	}
+
+	// Copy-mode selection drag takes priority over terminal mouse forwarding.
+	if isCopyModeMouseDrag(o) {
+		draggedWindow := o.Windows[o.DraggedWindowIndex]
+		scrollDir := HandleCopyModeMouseMotion(draggedWindow.CopyMode, draggedWindow, mouse.X, mouse.Y)
+		o.AutoScrollDir = scrollDir
+		if scrollDir != 0 && !o.AutoScrollActive {
+			o.AutoScrollActive = true
+			return o, tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+				return app.AutoScrollTickMsg{}
+			})
+		}
+		if scrollDir == 0 {
+			o.AutoScrollActive = false
+		}
+		return o, nil
+	}
+
 	// Forward mouse motion to terminal if in terminal mode and window supports motion events.
 	// Only modes 1002 (button-event) and 1003 (any-event) support motion forwarding.
 	// Mode 1000/1001 (normal tracking) only supports click/release  - forwarding motion
 	// events to these apps causes phantom keypresses (issue #78).
-	if o.Mode == app.TerminalMode {
+	if o.Mode == app.TerminalMode && !focusedCopyModeActive(o) {
 		focusedWindow := o.GetFocusedWindow()
 		if focusedWindow != nil && focusedWindow.Terminal != nil {
 			shouldForward := focusedWindow.Terminal.SupportsMotionEvents()
@@ -399,32 +452,6 @@ func handleMouseMotion(msg tea.MouseMotionMsg, o *app.OS) (*app.OS, tea.Cmd) {
 					return o, nil
 				}
 			}
-		}
-	}
-
-	// Handle scrollbar drag
-	if o.ScrollbarDragging && o.ScrollbarDragWindowIndex >= 0 && o.ScrollbarDragWindowIndex < len(o.Windows) {
-		win := o.Windows[o.ScrollbarDragWindowIndex]
-		scrollToPosition(win, mouse.Y)
-		return o, nil
-	}
-
-	// Handle copy mode mouse motion
-	if o.Dragging && o.DraggedWindowIndex >= 0 && o.DraggedWindowIndex < len(o.Windows) {
-		draggedWindow := o.Windows[o.DraggedWindowIndex]
-		if draggedWindow.CopyMode != nil && draggedWindow.CopyMode.Active {
-			scrollDir := HandleCopyModeMouseMotion(draggedWindow.CopyMode, draggedWindow, mouse.X, mouse.Y)
-			o.AutoScrollDir = scrollDir
-			if scrollDir != 0 && !o.AutoScrollActive {
-				o.AutoScrollActive = true
-				return o, tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
-					return app.AutoScrollTickMsg{}
-				})
-			}
-			if scrollDir == 0 {
-				o.AutoScrollActive = false
-			}
-			return o, nil
 		}
 	}
 
@@ -744,8 +771,32 @@ func handleMouseMotion(msg tea.MouseMotionMsg, o *app.OS) (*app.OS, tea.Cmd) {
 func handleMouseRelease(msg tea.MouseReleaseMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	// Reset pointer shape on release
 	app.ResetPointerShape()
+
+	// Copy-mode selection completion takes priority over terminal mouse forwarding.
+	if isCopyModeMouseDrag(o) {
+		draggedWindow := o.Windows[o.DraggedWindowIndex]
+		var cmd tea.Cmd
+		if draggedWindow.CopyMode.State == terminal.CopyModeVisualChar ||
+			draggedWindow.CopyMode.State == terminal.CopyModeVisualLine {
+			if text := extractVisualText(draggedWindow.CopyMode, draggedWindow); text != "" {
+				cmd = copyToSystemClipboard(text)
+				o.ShowNotification(
+					fmt.Sprintf("Copied %d chars", len(text)),
+					"success",
+					config.NotificationDuration,
+				)
+			}
+		}
+		o.Dragging = false
+		o.DraggedWindowIndex = -1
+		o.InteractionMode = false
+		o.AutoScrollActive = false
+		o.AutoScrollDir = 0
+		return o, cmd
+	}
+
 	// Forward mouse release to terminal if in terminal mode and window has mouse tracking
-	if o.Mode == app.TerminalMode {
+	if o.Mode == app.TerminalMode && !focusedCopyModeActive(o) {
 		focusedWindow := o.GetFocusedWindow()
 		if focusedWindow != nil && focusedWindow.Terminal != nil && focusedWindow.Terminal.HasMouseMode() {
 			mouse := msg.Mouse()
@@ -773,20 +824,6 @@ func handleMouseRelease(msg tea.MouseReleaseMsg, o *app.OS) (*app.OS, tea.Cmd) {
 		o.InteractionMode = false
 		o.DraggedWindowIndex = -1
 		return o, nil
-	}
-
-	// Handle copy mode mouse release
-	if o.Dragging && o.DraggedWindowIndex >= 0 && o.DraggedWindowIndex < len(o.Windows) {
-		draggedWindow := o.Windows[o.DraggedWindowIndex]
-		if draggedWindow.CopyMode != nil && draggedWindow.CopyMode.Active {
-			// Selection is complete, clean up drag state and stop auto-scroll
-			o.Dragging = false
-			o.DraggedWindowIndex = -1
-			o.InteractionMode = false
-			o.AutoScrollActive = false
-			o.AutoScrollDir = 0
-			return o, nil
-		}
 	}
 
 	// Handle text selection completion

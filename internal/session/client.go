@@ -6,11 +6,10 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
+	"github.com/Gaurav-Gosain/tuios/internal/config"
 	"github.com/charmbracelet/colorprofile"
 	"golang.org/x/term"
 )
@@ -690,28 +689,5 @@ func detectTerminalEnv() (termType, colorTerm string) {
 
 // detectShell detects the user's preferred shell.
 func detectShell() string {
-	// Check SHELL environment variable
-	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
-	}
-
-	// Platform-specific fallbacks
-	if runtime.GOOS == "windows" {
-		shells := []string{"powershell.exe", "pwsh.exe", "cmd.exe"}
-		for _, shell := range shells {
-			if _, err := exec.LookPath(shell); err == nil {
-				return shell
-			}
-		}
-		return "cmd.exe"
-	}
-
-	// Unix shells
-	shells := []string{"/bin/bash", "/bin/zsh", "/bin/fish", "/bin/sh"}
-	for _, shell := range shells {
-		if _, err := os.Stat(shell); err == nil {
-			return shell
-		}
-	}
-	return "/bin/sh"
+	return config.DetectShell()
 }

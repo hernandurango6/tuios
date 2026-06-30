@@ -2,11 +2,9 @@
 package input
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/Gaurav-Gosain/tuios/internal/app"
-	"github.com/Gaurav-Gosain/tuios/internal/config"
 	"github.com/Gaurav-Gosain/tuios/internal/terminal"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -146,36 +144,7 @@ func extractSelectedText(window *terminal.Window, _ *app.OS) string {
 	return strings.TrimSpace(selectedText.String())
 }
 
-// handleClipboardPaste processes clipboard content and sends it to the focused terminal
+// handleClipboardPaste processes clipboard content and sends it to the focused terminal.
 func handleClipboardPaste(o *app.OS) {
-	if o.FocusedWindow < 0 || o.FocusedWindow >= len(o.Windows) {
-		return
-	}
-
-	focusedWindow := o.GetFocusedWindow()
-	if focusedWindow == nil {
-		return
-	}
-
-	if o.ClipboardContent == "" {
-		o.ShowNotification("Clipboard is empty", "warning", config.NotificationDuration)
-		return
-	}
-
-	// Build paste content with bracketed paste sequences if the app has enabled it.
-	// We use SendInput() instead of Terminal.Paste() because in daemon mode,
-	// Terminal.Paste() writes to an internal pipe that gets drained by
-	// StartDaemonResponseReader() - the data never reaches the PTY.
-	// SendInput() properly routes through DaemonWriteFunc in daemon mode.
-	pasteContent := o.ClipboardContent
-	if focusedWindow.Terminal != nil && focusedWindow.Terminal.BracketedPasteEnabled() {
-		pasteContent = "\x1b[200~" + pasteContent + "\x1b[201~"
-	}
-
-	if err := focusedWindow.SendInput([]byte(pasteContent)); err != nil {
-		o.ShowNotification("Paste failed", "error", config.NotificationDuration)
-		return
-	}
-
-	o.ShowNotification(fmt.Sprintf("Pasted %d characters", len(o.ClipboardContent)), "success", config.NotificationDuration)
+	sendPasteToTerminal(o, o.ClipboardContent)
 }

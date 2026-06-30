@@ -117,7 +117,7 @@ func (h *KittyGraphicsHandler) handleTransmit(cmd *KittyCommand, place bool) boo
 		}
 		data = fileData
 	case KittyMediumSharedMemory:
-		shmData, err := loadSharedMemory(cmd.FilePath, cmd.Size)
+		shmData, err := ReadKittyMediumData(cmd)
 		if err != nil {
 			kittyDebugLog("Shared memory load failed: %v (path=%s, size=%d)", err, cmd.FilePath, cmd.Size)
 			h.sendResponse(cmd, false, "ENOENT:shared memory not found")

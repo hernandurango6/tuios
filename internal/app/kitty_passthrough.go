@@ -743,8 +743,8 @@ func (kp *KittyPassthrough) forwardFileTransmit(cmd *vt.KittyCommand, windowID s
 	}
 
 	filePath := cmd.FilePath
-	if cmd.Medium == vt.KittyMediumSharedMemory {
-		filePath = "/dev/shm/" + cmd.FilePath
+	if shmPath, ok := vt.SharedMemoryFSPath(cmd.FilePath); ok && cmd.Medium == vt.KittyMediumSharedMemory {
+		filePath = shmPath
 	}
 
 	kittyPassthroughLog("forwardFileTransmit: file=%s, andPlace=%v, medium=%c", filePath, andPlace, cmd.Medium)
@@ -993,7 +993,13 @@ func (kp *KittyPassthrough) forwardFileTransmitInline(
 	scrollbackLen int,
 	isAltScreen bool,
 ) {
-	data, err := os.ReadFile(filePath)
+	var data []byte
+	var err error
+	if cmd.Medium == vt.KittyMediumSharedMemory {
+		data, err = vt.ReadKittyMediumData(cmd)
+	} else {
+		data, err = os.ReadFile(filePath)
+	}
 	if err != nil {
 		kittyPassthroughLog("forwardFileTransmitInline: read %s failed: %v", filePath, err)
 		return
