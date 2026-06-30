@@ -159,6 +159,8 @@ type OS struct {
 	Notifications         []Notification          // Active notifications
 	SelectionMode         bool                    // True when in text selection mode
 	ClipboardContent      string                  // Store clipboard content from tea.ClipboardMsg
+	PasteInProgress       bool                    // True while host terminal is delivering bracketed paste
+	PasteBuffer           string                  // Accumulates leaked key events during bracketed paste
 	ShowCacheStats        bool                    // True when showing style cache statistics overlay
 	ShowQuitConfirm       bool                    // True when showing quit confirmation dialog
 	QuitConfirmSelection  int                     // 0 = Yes (left), 1 = No (right)

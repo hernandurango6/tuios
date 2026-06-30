@@ -3,6 +3,8 @@ package terminal
 import (
 	"fmt"
 	"os"
+
+	"golang.org/x/term"
 )
 
 // ResetTerminal sends escape sequences to reset the terminal to a clean state.
@@ -20,5 +22,8 @@ func ResetTerminal() {
 			"\033[0m" + // Reset all text attributes
 			"\r\n", // Clean line ending
 	)
-	_ = os.Stdout.Sync()
+	// Sync can hang on Windows when stdout is a pipe or other non-console handle.
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		_ = os.Stdout.Sync()
+	}
 }

@@ -24,8 +24,10 @@ func HandleInput(msg tea.Msg, o *app.OS) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		result, cmd = HandleKeyPress(msg, o)
 	case tea.PasteStartMsg:
+		handlePasteStart(o)
 		return o, nil
 	case tea.PasteEndMsg:
+		handlePasteEnd(o)
 		return o, nil
 	case tea.MouseClickMsg:
 		if o.ShowScrollbackBrowser {
@@ -54,21 +56,16 @@ func HandleInput(msg tea.Msg, o *app.OS) (tea.Model, tea.Cmd) {
 			result, cmd = handleMouseWheel(msg, o)
 		}
 	case tea.PasteMsg:
-		// Handle bracketed paste from terminal (when pasting via Cmd+V in Ghostty, etc.)
-		// Only handle paste in terminal mode
-		if o.Mode == app.TerminalMode {
-			o.ClipboardContent = msg.Content
-			handleClipboardPaste(o)
-		}
+		// Handle bracketed paste from terminal (Shift+Insert, right-click, etc.)
+		handlePasteContent(o, msg.Content)
 		return o, nil
 	case tea.ClipboardMsg:
 		// Handle OSC 52 clipboard read response (from tea.ReadClipboard)
-		// Only handle paste in terminal mode
 		if o.Mode == app.TerminalMode {
-			o.ClipboardContent = msg.Content
-			handleClipboardPaste(o)
+			handlePasteContent(o, msg.Content)
 		}
 		return o, nil
+
 	default:
 		return o, nil
 	}
@@ -358,7 +355,9 @@ func HandlePrefixCommand(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 			focusedWindow := o.GetFocusedWindow()
 			if focusedWindow != nil {
 				o.RenamingWindow = true
-				if fw := o.GetFocusedWindow(); fw != nil { fw.InvalidateCache() }
+				if fw := o.GetFocusedWindow(); fw != nil {
+					fw.InvalidateCache()
+				}
 				o.RenameBuffer = focusedWindow.CustomName
 			}
 		}

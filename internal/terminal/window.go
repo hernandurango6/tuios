@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -767,61 +766,7 @@ func (w *Window) UpdateThemeColors() {
 }
 
 func detectShell() string {
-	// Check user configuration first
-	if cfg, err := config.LoadUserConfig(); err == nil && cfg.Appearance.PreferredShell != "" {
-		preferredShell := cfg.Appearance.PreferredShell
-
-		// just do a check in case
-		if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(preferredShell), ".exe") {
-			preferredShell += ".exe"
-		}
-
-		shellExists := false
-		if runtime.GOOS == "windows" {
-			_, err = exec.LookPath(preferredShell)
-			shellExists = err == nil
-		} else {
-			_, err = os.Stat(preferredShell)
-			shellExists = err == nil
-		}
-
-		if shellExists {
-			return preferredShell
-		}
-		fmt.Fprintf(os.Stderr, "Warning: Configured shell '%s' not found. Falling back to defaults.\n", preferredShell)
-	}
-
-	// Check environment variable
-	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
-	}
-
-	// Check if we're on Windows
-	if runtime.GOOS == "windows" {
-		// Check for PowerShell or CMD
-		shells := []string{
-			"powershell.exe",
-			"pwsh.exe", // PowerShell Core/7+
-			"cmd.exe",
-		}
-		for _, shell := range shells {
-			if _, err := exec.LookPath(shell); err == nil {
-				return shell
-			}
-		}
-		// Windows fallback
-		return "cmd.exe"
-	}
-
-	// Unix/Linux/macOS shells
-	shells := []string{"/bin/bash", "/bin/zsh", "/bin/fish", "/bin/sh"}
-	for _, shell := range shells {
-		if _, err := os.Stat(shell); err == nil {
-			return shell
-		}
-	}
-	// Unix fallback
-	return "/bin/sh"
+	return config.DetectShell()
 }
 
 // getTerminalEnv returns TERM and COLORTERM values for the current environment.

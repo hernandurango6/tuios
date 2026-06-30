@@ -14,6 +14,11 @@ import (
 
 // HandleTerminalModeKey handles keyboard input in terminal mode
 func HandleTerminalModeKey(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
+	// Buffer leaked key events while the host terminal delivers bracketed paste.
+	if accumulatePasteKey(msg, o) {
+		return o, nil
+	}
+
 	// Guard: suppress misparsed mouse-sequence fragments during AllMotion→CellMotion transition.
 	// When switching from WindowManagementMode (AllMotion) to TerminalMode (CellMotion),
 	// buffered mouse motion sequences can be split across read boundaries. ultraviolet's
@@ -302,12 +307,10 @@ func HandleTerminalModeKey(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 		return o, nil
 	}
 
-	// Handle paste shortcuts - intercept and request clipboard via OSC 52
+	// Handle paste shortcuts - prefer native clipboard, fall back to OSC 52.
 	if keyStr == "ctrl+v" || keyStr == "ctrl+shift+v" || keyStr == "super+v" || keyStr == "super+shift+v" {
 		if focusedWindow != nil {
-			// Use tea.ReadClipboard to request clipboard via OSC 52
-			// This will generate a tea.ClipboardMsg which we handle in handler.go
-			return o, tea.ReadClipboard
+			return o, requestClipboardPaste(o)
 		}
 		return o, nil
 	}
@@ -438,7 +441,9 @@ func handleTerminalTilingPrefix(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cm
 			if focusedWindow != nil {
 				o.Mode = app.WindowManagementMode
 				o.RenamingWindow = true
-				if fw := o.GetFocusedWindow(); fw != nil { fw.InvalidateCache() }
+				if fw := o.GetFocusedWindow(); fw != nil {
+					fw.InvalidateCache()
+				}
 				o.RenameBuffer = focusedWindow.CustomName
 			}
 		}
@@ -645,7 +650,9 @@ func handleTerminalPrefixCommand(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.C
 			if focusedWindow != nil {
 				o.Mode = app.WindowManagementMode
 				o.RenamingWindow = true
-				if fw := o.GetFocusedWindow(); fw != nil { fw.InvalidateCache() }
+				if fw := o.GetFocusedWindow(); fw != nil {
+					fw.InvalidateCache()
+				}
 				o.RenameBuffer = focusedWindow.CustomName
 			}
 		}
@@ -1060,7 +1067,9 @@ func HandleTilingPrefixCommand(msg tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd
 			focusedWindow := o.GetFocusedWindow()
 			if focusedWindow != nil {
 				o.RenamingWindow = true
-				if fw := o.GetFocusedWindow(); fw != nil { fw.InvalidateCache() }
+				if fw := o.GetFocusedWindow(); fw != nil {
+					fw.InvalidateCache()
+				}
 				o.RenameBuffer = focusedWindow.CustomName
 			}
 		}

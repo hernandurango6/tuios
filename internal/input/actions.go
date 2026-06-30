@@ -198,7 +198,9 @@ func handleRenameWindow(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 		focusedWindow := o.GetFocusedWindow()
 		if focusedWindow != nil {
 			o.RenamingWindow = true
-				if fw := o.GetFocusedWindow(); fw != nil { fw.InvalidateCache() }
+			if fw := o.GetFocusedWindow(); fw != nil {
+				fw.InvalidateCache()
+			}
 			o.RenameBuffer = focusedWindow.CustomName
 		}
 	}
@@ -592,13 +594,11 @@ func handleToggleCacheStats(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	return o, nil
 }
 
-
 func handlePasteClipboard(_ tea.KeyPressMsg, o *app.OS) (*app.OS, tea.Cmd) {
 	if o.FocusedWindow >= 0 && o.FocusedWindow < len(o.Windows) {
 		focusedWindow := o.GetFocusedWindow()
 		if focusedWindow != nil {
-			// Request clipboard content from Bubbletea
-			return o, tea.ReadClipboard
+			return o, requestClipboardPaste(o)
 		}
 	}
 	return o, nil

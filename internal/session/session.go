@@ -8,10 +8,10 @@ import (
 	"maps"
 	"os"
 	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
+	"github.com/Gaurav-Gosain/tuios/internal/config"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	xpty "github.com/charmbracelet/x/xpty"
@@ -415,13 +415,7 @@ func (s *Session) getShell() string {
 	if s.config != nil && s.config.Shell != "" {
 		return s.config.Shell
 	}
-	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
-	}
-	if runtime.GOOS == "windows" {
-		return "cmd.exe"
-	}
-	return "/bin/sh"
+	return config.DetectShell()
 }
 
 func (s *Session) buildEnv() []string {
