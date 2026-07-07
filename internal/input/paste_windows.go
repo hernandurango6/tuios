@@ -12,6 +12,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/Gaurav-Gosain/tuios/internal/app"
 )
 
 const (
@@ -37,9 +39,11 @@ var (
 	procGlobalUnlock               = modKernel32.NewProc("GlobalUnlock")
 )
 
-// readSystemClipboard reads UTF-16 text from the Windows clipboard.
-func readSystemClipboard() (string, bool) {
-	// First try to read Unicode text
+// readSystemClipboard reads UTF-16 text or an image from the Windows clipboard.
+// If the clipboard holds an image (CF_DIB/CF_BITMAP) the image is saved to a
+// temporary PNG file and its path is returned so the caller can paste the path.
+func readSystemClipboard(o *app.OS) (string, bool) {
+	// --- Step 1: try text ---
 	text, hasText := func() (string, bool) {
 		ret, _, _ := procOpenClipboard.Call(0)
 		if ret == 0 {
@@ -65,25 +69,47 @@ func readSystemClipboard() (string, bool) {
 		return text, true
 	}
 
-	// Text not available. Check if image is available (does not require open clipboard).
+	// --- Step 2: try image (IsClipboardFormatAvailable does not require an open clipboard) ---
 	retDIB, _, _ := procIsClipboardFormatAvailable.Call(cfDIB)
 	retBitmap, _, _ := procIsClipboardFormatAvailable.Call(cfBitmap)
-	if retDIB != 0 || retBitmap != 0 {
-		tempDir := os.TempDir()
-		tempFile := filepath.Join(tempDir, fmt.Sprintf("tuios_clipboard_image_%d.png", time.Now().UnixNano()))
-
-		cmdText := fmt.Sprintf(`Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $img.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png) }`, tempFile)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", cmdText)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-
-		if err := cmd.Run(); err == nil {
-			if info, err := os.Stat(tempFile); err == nil && info.Size() > 0 {
-				return tempFile, true
-			}
-		}
+	if retDIB == 0 && retBitmap == 0 {
+		return "", false
 	}
 
-	return "", false
+	tempDir := os.TempDir()
+	tempFile := filepath.Join(tempDir, fmt.Sprintf("tuios_clipboard_image_%d.png", time.Now().UnixNano()))
+
+	// Use Windows PowerShell (always available) to decode the clipboard image and
+	// save it as PNG. The -STA flag is required for Windows.Forms clipboard access.
+	psCmd := fmt.Sprintf(
+		`Add-Type -AssemblyName System.Windows.Forms; `+
+			`Add-Type -AssemblyName System.Drawing; `+
+			`$img = [System.Windows.Forms.Clipboard]::GetImage(); `+
+			`if ($img) { $img.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png) }`,
+		tempFile,
+	)
+	cmd := exec.Command("powershell", "-NoProfile", "-STA", "-Command", psCmd)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	if err := cmd.Run(); err != nil {
+		if o != nil {
+			o.LogError("clipboard image: powershell failed: %v", err)
+		}
+		return "", false
+	}
+
+	info, err := os.Stat(tempFile)
+	if err != nil || info.Size() == 0 {
+		if o != nil {
+			o.LogError("clipboard image: temp file missing or empty: %v", err)
+		}
+		return "", false
+	}
+
+	if o != nil {
+		o.LogInfo("clipboard image saved: %s (%d bytes)", tempFile, info.Size())
+	}
+	return tempFile, true
 }
 
 // writeSystemClipboard writes UTF-16 text to the Windows clipboard.

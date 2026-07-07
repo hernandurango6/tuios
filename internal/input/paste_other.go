@@ -2,8 +2,11 @@
 
 package input
 
+import "github.com/Gaurav-Gosain/tuios/internal/app"
+
 // readSystemClipboard is only implemented on Windows; other platforms use OSC 52.
-func readSystemClipboard() (string, bool) {
+func readSystemClipboard(o *app.OS) (string, bool) {
+	_ = o
 	return "", false
 }
 

@@ -156,7 +156,7 @@ func copyToSystemClipboard(text string) tea.Cmd {
 
 // pasteFromSystemClipboard pastes into the focused terminal, preferring native clipboard APIs.
 func pasteFromSystemClipboard(o *app.OS) tea.Cmd {
-	if content, ok := readSystemClipboard(); ok {
+	if content, ok := readSystemClipboard(o); ok {
 		handlePasteContent(o, content)
 		return nil
 	}
