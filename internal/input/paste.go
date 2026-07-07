@@ -131,13 +131,19 @@ func sendPasteToTerminal(o *app.OS, content string) {
 		return
 	}
 
+	isImagePath := strings.Contains(content, "tuios_clipboard_image_") && strings.HasSuffix(content, ".png")
+
 	pasteContent := buildPastePayload(content, bracketedPasteEnabledForWindow(o))
 	if err := focusedWindow.SendInput([]byte(pasteContent)); err != nil {
 		o.ShowNotification("Paste failed", "error", config.NotificationDuration)
 		return
 	}
 
-	o.ShowNotification(fmt.Sprintf("Pasted %d characters", len(content)), "success", config.NotificationDuration)
+	if isImagePath {
+		o.ShowNotification("Pasted clipboard image path", "success", config.NotificationDuration)
+	} else {
+		o.ShowNotification(fmt.Sprintf("Pasted %d characters", len(content)), "success", config.NotificationDuration)
+	}
 }
 
 // copyToSystemClipboard copies text to the OS clipboard.

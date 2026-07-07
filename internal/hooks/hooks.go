@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"runtime"
 )
 
 // Event represents a hook event type.
@@ -130,8 +131,12 @@ func (m *Manager) HasHooks() bool {
 
 // executeHook runs a shell command with context as environment variables.
 func executeHook(cmdStr string, ctx Context) {
-	// Use sh -c for shell interpretation
-	cmd := exec.Command("sh", "-c", cmdStr)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", cmdStr)
+	} else {
+		cmd = exec.Command("sh", "-c", cmdStr)
+	}
 
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
